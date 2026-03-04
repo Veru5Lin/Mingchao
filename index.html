@@ -142,6 +142,7 @@
         
         .gacha-icon.gold { background: linear-gradient(135deg, var(--gold), var(--gold-light)); }
         .gacha-icon.green { background: linear-gradient(135deg, var(--green), var(--green-light)); }
+        .gacha-icon.purple { background: linear-gradient(135deg, var(--purple), #A78BFA); }
         
         .gacha-info { flex: 1; min-width: 0; }
         .gacha-name { font-weight: 600; margin-bottom: 4px; }
@@ -164,6 +165,9 @@
             transition: width 0.5s ease;
         }
         
+        .gacha-bar-fill.green { background: linear-gradient(90deg, var(--green), var(--green-light)); }
+        .gacha-bar-fill.purple { background: linear-gradient(90deg, var(--purple), #A78BFA); }
+        
         .gacha-bar-text {
             font-size: 11px;
             font-weight: 600;
@@ -179,6 +183,9 @@
             margin-left: 12px;
             flex-shrink: 0;
         }
+        
+        .gacha-count.green { color: var(--green); }
+        .gacha-count.purple { color: var(--purple); }
         
         .lost-badge {
             background: var(--red);
@@ -235,6 +242,40 @@
         }
         
         .share-btn:hover { background: var(--border); }
+        
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--red);
+            color: var(--red);
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            overflow-x: auto;
+        }
+        
+        .tab {
+            background: var(--bg-input);
+            color: var(--text-gray);
+            padding: 10px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 1px solid transparent;
+        }
+        
+        .tab.active {
+            background: var(--gold);
+            color: var(--bg-dark);
+        }
     </style>
 </head>
 <body>
@@ -244,18 +285,22 @@
             <p>粘贴抽卡记录 URL，一键分析欧皇程度</p>
         </div>
         
+        <div id="errorDiv" class="error-message hidden"></div>
+        
         <div class="card input-section">
             <h2 style="margin-bottom: 16px;">📋 粘贴抽卡记录 URL</h2>
             <textarea id="inputData" placeholder="从游戏日志 Client.log 中复制抽卡记录 URL...
 
 示例：
-https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&player_id=xxx&..."></textarea>
+https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&player_id=xxx&...
+
+或者粘贴包含 authkey 的完整 API URL"></textarea>
             <button class="btn" id="analyzeBtn" onclick="analyzeData()">🚀 开始分析</button>
         </div>
         
         <div id="loading" class="loading hidden">
             <div class="spinner"></div>
-            <p>正在分析抽卡数据...</p>
+            <p>正在获取抽卡数据，请稍候...</p>
         </div>
         
         <div id="results" class="hidden">
@@ -283,8 +328,13 @@ https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&pl
                 </div>
             </div>
             
+            <div class="tabs">
+                <div class="tab active" onclick="switchTab('character')">角色唤取</div>
+                <div class="tab" onclick="switchTab('weapon')">武器唤取</div>
+            </div>
+            
             <div class="card">
-                <h3 style="margin-bottom: 16px;">🎭 五星角色详情</h3>
+                <h3 style="margin-bottom: 16px;" id="gachaTitle">🎭 角色唤取记录</h3>
                 <div id="gachaItems"></div>
             </div>
             
@@ -303,72 +353,184 @@ https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&pl
     </div>
     
     <script>
+        // 角色图标映射
         const characterIcons = {
             '吟霖': '🎭', '忌炎': '⚔️', '维里奈': '🌸', '卡卡罗': '💀',
             '凌阳': '🐯', '安可': '🔥', '丹瑾': '💎', '今汐': '🐉',
             '长离': '🦅', '折枝': '🎨', '守岸人': '🌊', '相里要': '⚡',
+            '秧秧': '🌾', '炽霞': '☀️', '莫特斐': '🎹', '散华': '❄️',
         };
         
+        // 武器图标映射
+        const weaponIcons = {
+            '千古洑流': '🗡️', '赫奕流明': '✨', '苍鳞千嶂': '🛡️',
+            '不灭星环': '⭐', '清音': '🎵', '浩境粼光': '💫',
+            '商声': '🎶', '角': '🎺', '徵': '🎼',
+        };
+        
+        // 限定角色列表
         const limitedCharacters = ['吟霖', '忌炎', '今汐', '长离', '折枝', '守岸人', '相里要'];
         
-        function analyzeData() {
+        // 限定武器列表
+        const limitedWeapons = ['千古洑流', '赫奕流明', '苍鳞千嶂', '不灭星环'];
+        
+        // 全局数据
+        let gachaData = {
+            characters: [],
+            weapons: [],
+            totalPulls: 0
+        };
+        
+        // CORS 代理列表
+        const CORS_PROXIES = [
+            'https://api.allorigins.win/raw?url=',
+            'https://corsproxy.io/?',
+            'https://cors-anywhere.herokuapp.com/',
+        ];
+        
+        // 分析数据
+        async function analyzeData() {
             const input = document.getElementById('inputData').value.trim();
             const btn = document.getElementById('analyzeBtn');
             const loading = document.getElementById('loading');
             const results = document.getElementById('results');
+            const errorDiv = document.getElementById('errorDiv');
             
             if (!input) {
-                alert('请先粘贴抽卡记录 URL！');
+                showError('请先粘贴抽卡记录 URL！');
                 return;
             }
             
+            // 隐藏错误
+            hideError();
+            
+            // 解析 URL
             const params = parseUrl(input);
-            const playerId = params.player_id || '未知';
+            const playerId = params.player_id || params.uid || '未知';
             
             if (playerId === '未知') {
-                alert('未在 URL 中找到 player_id，请检查 URL 是否正确');
+                showError('未在 URL 中找到 player_id 或 uid，请检查 URL 是否正确');
                 return;
             }
             
+            // 显示加载状态
             btn.disabled = true;
-            btn.textContent = '分析中...';
+            btn.textContent = '获取中...';
             loading.classList.remove('hidden');
             results.classList.add('hidden');
             
-            setTimeout(() => {
+            try {
+                // 尝试获取真实数据
+                const data = await fetchGachaData(input);
+                
+                if (data && data.records && data.records.length > 0) {
+                    // 分析真实数据
+                    const analysis = analyzeRealData(data);
+                    displayResults(analysis);
+                } else {
+                    // 使用模拟数据
+                    const analysis = generateAnalysis(playerId);
+                    displayResults(analysis);
+                    showWarning('无法获取真实数据，显示模拟数据（演示用）');
+                }
+                
+            } catch (error) {
+                console.error('分析出错:', error);
+                // 使用模拟数据
                 const analysis = generateAnalysis(playerId);
                 displayResults(analysis);
-                
-                loading.classList.add('hidden');
-                btn.disabled = false;
-                btn.textContent = '🚀 开始分析';
-                results.classList.remove('hidden');
-                results.scrollIntoView({ behavior: 'smooth' });
-            }, 1500);
-        }
-        
-        function parseUrl(url) {
-            const params = {};
-            let query = '';
-            
-            if (url.includes('#') && url.split('#')[1].includes('?')) {
-                query = url.split('#')[1].split('?')[1];
-            } else if (url.includes('?')) {
-                query = url.split('?')[1];
+                showWarning('网络请求失败，显示模拟数据（演示用）');
             }
             
-            if (!query) return params;
+            loading.classList.add('hidden');
+            btn.disabled = false;
+            btn.textContent = '🚀 开始分析';
+            results.classList.remove('hidden');
+            results.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        // 获取抽卡数据
+        async function fetchGachaData(url) {
+            // 尝试通过 CORS 代理获取数据
+            for (const proxy of CORS_PROXIES) {
+                try {
+                    const proxyUrl = proxy + encodeURIComponent(url);
+                    const response = await fetch(proxyUrl, {
+                        method: 'GET',
+                        headers: {
+                            'Accept': 'application/json',
+                        },
+                        timeout: 10000,
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        return data;
+                    }
+                } catch (error) {
+                    console.log(`代理 ${proxy} 失败:`, error.message);
+                    continue;
+                }
+            }
             
-            query.split('&').forEach(pair => {
-                const [key, value] = pair.split('=');
-                if (key && value) {
-                    params[decodeURIComponent(key)] = decodeURIComponent(value);
+            return null;
+        }
+        
+        // 分析真实数据
+        function analyzeRealData(data) {
+            const records = data.records || [];
+            
+            // 分类角色和武器
+            const characters = [];
+            const weapons = [];
+            let totalPulls = 0;
+            
+            records.forEach(record => {
+                totalPulls++;
+                if (record.gacha_type === 'character' || record.type === 'character') {
+                    characters.push(record);
+                } else if (record.gacha_type === 'weapon' || record.type === 'weapon') {
+                    weapons.push(record);
                 }
             });
             
-            return params;
+            // 统计五星
+            const fiveStarChars = characters.filter(r => r.rarity === 5);
+            const fiveStarWeapons = weapons.filter(r => r.rarity === 5);
+            
+            // 计算平均保底
+            const avgCharPity = fiveStarChars.length > 0 ?
+                fiveStarChars.reduce((sum, r) => sum + (r.pity_count || 80), 0) / fiveStarChars.length : 0;
+            
+            const avgWeaponPity = fiveStarWeapons.length > 0 ?
+                fiveStarWeapons.reduce((sum, r) => sum + (r.pity_count || 80), 0) / fiveStarWeapons.length : 0;
+            
+            // 统计不歪
+            const notLostCount = fiveStarChars.filter(r => r.is_limited && !r.is_lost).length;
+            const notLostRate = fiveStarChars.length > 0 ? Math.round(notLostCount / fiveStarChars.length * 100) : 0;
+            
+            // 评级
+            let rating;
+            if (avgCharPity < 50) rating = '欧皇转世';
+            else if (avgCharPity < 60) rating = '欧气附体小欧皇';
+            else if (avgCharPity < 70) rating = '运气还不错';
+            else if (avgCharPity < 75) rating = '普通人';
+            else rating = '非酋保护';
+            
+            return {
+                playerId: data.player_id || '未知',
+                totalPulls,
+                fiveStarCount: fiveStarChars.length + fiveStarWeapons.length,
+                avgPity: Math.round(avgCharPity * 10) / 10,
+                notLostRate,
+                limitedCount: notLostCount,
+                rating,
+                characters,
+                weapons
+            };
         }
         
+        // 生成模拟数据
         function generateAnalysis(playerId) {
             let seed = playerId.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
             const random = () => {
@@ -394,10 +556,10 @@ https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&pl
                     name = standard[Math.floor(random() * standard.length)];
                 }
                 
-                fiveStars.push({ name, pulls, isLimited, isLost, isWeapon: false });
+                fiveStars.push({ name, pulls, isLimited, isLost, isWeapon: false, rarity: 5 });
             }
             
-            const avgPity = fiveStars.length > 0 ? 
+            const avgPity = fiveStars.length > 0 ?
                 Math.round(fiveStars.reduce((sum, s) => sum + s.pulls, 0) / fiveStars.length * 10) / 10 : 0;
             
             const limitedCount = fiveStars.filter(s => s.isLimited && !s.isLost).length;
@@ -410,51 +572,141 @@ https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&pl
             else if (avgPity < 75) rating = '普通人';
             else rating = '非酋保护';
             
-            return { playerId, totalPulls, fiveStarCount, avgPity, notLostRate, limitedCount, currentPity, rating, fiveStars };
+            return {
+                playerId, totalPulls, fiveStarCount, avgPity, notLostRate,
+                limitedCount, currentPity, rating, characters: fiveStars, weapons: []
+            };
         }
         
+        // 显示结果
         function displayResults(analysis) {
             document.getElementById('ratingTitle').textContent = analysis.rating;
             document.getElementById('totalPulls').textContent = analysis.totalPulls;
-            document.getElementById('avgGold').textContent = analysis.avgPity;
+            document.getElementById('avgGold').textContent = analysis.avgPity || '-';
             document.getElementById('fiveStarCount').textContent = analysis.fiveStarCount;
-            document.getElementById('pityRate').textContent = analysis.notLostRate + '%';
+            document.getElementById('pityRate').textContent = (analysis.notLostRate || 0) + '%';
             
-            const container = document.getElementById('gachaItems');
-            container.innerHTML = '';
-            container.innerHTML += createGachaItem('?', analysis.currentPity, 'unknown', true);
+            gachaData.characters = analysis.characters || [];
+            gachaData.weapons = analysis.weapons || [];
+            gachaData.totalPulls = analysis.totalPulls;
             
-            analysis.fiveStars.forEach(star => {
-                const icon = characterIcons[star.name] || '🎭';
-                const color = star.isLost ? 'green' : 'gold';
-                container.innerHTML += createGachaItem(icon, star.pulls, color, false, star.name, star.isLost);
-            });
+            // 默认显示角色
+            switchTab('character');
         }
         
-        function createGachaItem(icon, pulls, color, isPity, name = '', isLost = false) {
+        // 切换选项卡
+        function switchTab(type) {
+            // 更新选项卡状态
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            const container = document.getElementById('gachaItems');
+            const title = document.getElementById('gachaTitle');
+            container.innerHTML = '';
+            
+            if (type === 'character') {
+                title.textContent = '🎭 角色唤取记录';
+                
+                // 当前垫抽
+                const currentPity = Math.floor(Math.random() * 80);
+                container.innerHTML += createGachaItem('?', currentPity, 'unknown', true);
+                
+                // 角色列表
+                gachaData.characters.forEach(star => {
+                    const icon = characterIcons[star.name] || '🎭';
+                    const color = star.isLost ? 'green' : (star.rarity === 5 ? 'gold' : 'purple');
+                    container.innerHTML += createGachaItem(icon, star.pulls || star.pity_count || 80, color, false, star.name, star.isLost, star.rarity);
+                });
+            } else {
+                title.textContent = '⚔️ 武器唤取记录';
+                
+                // 武器列表
+                if (gachaData.weapons && gachaData.weapons.length > 0) {
+                    gachaData.weapons.forEach(weapon => {
+                        const icon = weaponIcons[weapon.name] || '⚔️';
+                        const color = weapon.isLost ? 'green' : (weapon.rarity === 5 ? 'gold' : 'purple');
+                        container.innerHTML += createGachaItem(icon, weapon.pulls || weapon.pity_count || 80, color, false, weapon.name, weapon.isLost, weapon.rarity);
+                    });
+                } else {
+                    container.innerHTML = '<p style="text-align: center; color: var(--text-gray); padding: 20px;">暂无武器数据</p>';
+                }
+            }
+        }
+        
+        // 创建抽卡条目
+        function createGachaItem(icon, pulls, color, isPity, name = '', isLost = false, rarity = 5) {
             const barWidth = Math.min(pulls / 80 * 100, 100);
             const displayName = isPity ? `已垫 ${pulls}抽` : name;
             const lostBadge = isLost ? '<span class="lost-badge">歪</span>' : '';
+            const rarityLabel = rarity === 5 ? 'gold' : (rarity === 4 ? 'purple' : 'green');
             
             return `
                 <div class="gacha-item">
-                    <div class="gacha-icon ${isPity ? '' : color}">${icon}</div>
+                    <div class="gacha-icon ${isPity ? '' : rarityLabel}">${icon}</div>
                     <div class="gacha-info">
                         <div class="gacha-name">${displayName}${lostBadge}</div>
                         <div class="gacha-bar">
-                            <div class="gacha-bar-fill ${color === 'green' ? 'green' : ''}" style="width: ${barWidth}%">
+                            <div class="gacha-bar-fill ${color === 'green' ? 'green' : (color === 'purple' ? 'purple' : '')}" style="width: ${barWidth}%">
                                 <span class="gacha-bar-text">${pulls}抽</span>
                             </div>
                         </div>
                     </div>
-                    <div class="gacha-count ${color === 'green' ? 'green' : ''}">${pulls}抽</div>
+                    <div class="gacha-count ${color === 'green' ? 'green' : (color === 'purple' ? 'purple' : '')}">${pulls}抽</div>
                 </div>
             `;
         }
         
+        // 显示错误
+        function showError(message) {
+            const errorDiv = document.getElementById('errorDiv');
+            errorDiv.textContent = '❌ ' + message;
+            errorDiv.classList.remove('hidden');
+        }
+        
+        // 显示警告
+        function showWarning(message) {
+            const errorDiv = document.getElementById('errorDiv');
+            errorDiv.textContent = '⚠️ ' + message;
+            errorDiv.style.borderColor = 'var(--orange-main)';
+            errorDiv.classList.remove('hidden');
+        }
+        
+        // 隐藏错误
+        function hideError() {
+            document.getElementById('errorDiv').classList.add('hidden');
+        }
+        
+        // 解析 URL 参数
+        function parseUrl(url) {
+            const params = {};
+            let query = '';
+            
+            if (url.includes('#') && url.split('#')[1].includes('?')) {
+                query = url.split('#')[1].split('?')[1];
+            } else if (url.includes('?')) {
+                query = url.split('?')[1];
+            }
+            
+            if (!query) return params;
+            
+            query.split('&').forEach(pair => {
+                const [key, value] = pair.split('=');
+                if (key && value) {
+                    params[decodeURIComponent(key)] = decodeURIComponent(value);
+                }
+            });
+            
+            return params;
+        }
+        
+        // 分享功能
         function copyUrl() {
             const url = window.location.href;
-            navigator.clipboard.writeText(url).then(() => alert('链接已复制！'));
+            navigator.clipboard.writeText(url).then(() => {
+                alert('链接已复制！');
+            }).catch(() => {
+                prompt('请手动复制链接：', url);
+            });
         }
         
         function shareToQQ() {
@@ -466,6 +718,9 @@ https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&pl
         function shareToWechat() {
             alert('长按右上角菜单 → 发送给朋友');
         }
+        
+        // 页面加载完成
+        console.log('🌊 鸣潮抽卡分析 H5（CORS 代理版）已加载');
     </script>
 </body>
 </html>
