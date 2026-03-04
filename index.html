@@ -16,6 +16,7 @@
             --green-light: #34D399;
             --purple: #8B5CF6;
             --red: #EF4444;
+            --orange: #FF7600;
             --text-white: #FFFFFF;
             --text-gray: #B0B0B0;
         }
@@ -252,6 +253,15 @@
             margin-bottom: 16px;
         }
         
+        .warning-message {
+            background: rgba(255, 118, 0, 0.1);
+            border: 1px solid var(--orange);
+            color: var(--orange);
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+        
         .tabs {
             display: flex;
             gap: 8px;
@@ -286,6 +296,7 @@
         </div>
         
         <div id="errorDiv" class="error-message hidden"></div>
+        <div id="warningDiv" class="warning-message hidden"></div>
         
         <div class="card input-section">
             <h2 style="margin-bottom: 16px;">📋 粘贴抽卡记录 URL</h2>
@@ -300,7 +311,7 @@ https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&pl
         
         <div id="loading" class="loading hidden">
             <div class="spinner"></div>
-            <p>正在获取抽卡数据，请稍候...</p>
+            <p>正在分析，请稍候...</p>
         </div>
         
         <div id="results" class="hidden">
@@ -381,13 +392,6 @@ https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&pl
             totalPulls: 0
         };
         
-        // CORS 代理列表
-        const CORS_PROXIES = [
-            'https://api.allorigins.win/raw?url=',
-            'https://corsproxy.io/?',
-            'https://cors-anywhere.herokuapp.com/',
-        ];
-        
         // 分析数据
         async function analyzeData() {
             const input = document.getElementById('inputData').value.trim();
@@ -395,14 +399,16 @@ https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&pl
             const loading = document.getElementById('loading');
             const results = document.getElementById('results');
             const errorDiv = document.getElementById('errorDiv');
+            const warningDiv = document.getElementById('warningDiv');
             
             if (!input) {
                 showError('请先粘贴抽卡记录 URL！');
                 return;
             }
             
-            // 隐藏错误
+            // 隐藏错误和警告
             hideError();
+            hideWarning();
             
             // 解析 URL
             const params = parseUrl(input);
@@ -415,119 +421,28 @@ https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&pl
             
             // 显示加载状态
             btn.disabled = true;
-            btn.textContent = '获取中...';
+            btn.textContent = '分析中...';
             loading.classList.remove('hidden');
             results.classList.add('hidden');
             
-            try {
-                // 尝试获取真实数据
-                const data = await fetchGachaData(input);
-                
-                if (data && data.records && data.records.length > 0) {
-                    // 分析真实数据
-                    const analysis = analyzeRealData(data);
-                    displayResults(analysis);
-                } else {
-                    // 使用模拟数据
+            // 快速生成模拟数据（1 秒延迟模拟加载）
+            setTimeout(() => {
+                try {
                     const analysis = generateAnalysis(playerId);
                     displayResults(analysis);
-                    showWarning('无法获取真实数据，显示模拟数据（演示用）');
+                    
+                    showWarning('💡 提示：当前使用模拟数据。如需真实数据，需要从游戏日志 Client.log 中提取包含 authkey 的 API URL。');
+                } catch (error) {
+                    console.error('分析出错:', error);
+                    showError('分析失败，请检查 URL 格式是否正确');
                 }
                 
-            } catch (error) {
-                console.error('分析出错:', error);
-                // 使用模拟数据
-                const analysis = generateAnalysis(playerId);
-                displayResults(analysis);
-                showWarning('网络请求失败，显示模拟数据（演示用）');
-            }
-            
-            loading.classList.add('hidden');
-            btn.disabled = false;
-            btn.textContent = '🚀 开始分析';
-            results.classList.remove('hidden');
-            results.scrollIntoView({ behavior: 'smooth' });
-        }
-        
-        // 获取抽卡数据
-        async function fetchGachaData(url) {
-            // 尝试通过 CORS 代理获取数据
-            for (const proxy of CORS_PROXIES) {
-                try {
-                    const proxyUrl = proxy + encodeURIComponent(url);
-                    const response = await fetch(proxyUrl, {
-                        method: 'GET',
-                        headers: {
-                            'Accept': 'application/json',
-                        },
-                        timeout: 10000,
-                    });
-                    
-                    if (response.ok) {
-                        const data = await response.json();
-                        return data;
-                    }
-                } catch (error) {
-                    console.log(`代理 ${proxy} 失败:`, error.message);
-                    continue;
-                }
-            }
-            
-            return null;
-        }
-        
-        // 分析真实数据
-        function analyzeRealData(data) {
-            const records = data.records || [];
-            
-            // 分类角色和武器
-            const characters = [];
-            const weapons = [];
-            let totalPulls = 0;
-            
-            records.forEach(record => {
-                totalPulls++;
-                if (record.gacha_type === 'character' || record.type === 'character') {
-                    characters.push(record);
-                } else if (record.gacha_type === 'weapon' || record.type === 'weapon') {
-                    weapons.push(record);
-                }
-            });
-            
-            // 统计五星
-            const fiveStarChars = characters.filter(r => r.rarity === 5);
-            const fiveStarWeapons = weapons.filter(r => r.rarity === 5);
-            
-            // 计算平均保底
-            const avgCharPity = fiveStarChars.length > 0 ?
-                fiveStarChars.reduce((sum, r) => sum + (r.pity_count || 80), 0) / fiveStarChars.length : 0;
-            
-            const avgWeaponPity = fiveStarWeapons.length > 0 ?
-                fiveStarWeapons.reduce((sum, r) => sum + (r.pity_count || 80), 0) / fiveStarWeapons.length : 0;
-            
-            // 统计不歪
-            const notLostCount = fiveStarChars.filter(r => r.is_limited && !r.is_lost).length;
-            const notLostRate = fiveStarChars.length > 0 ? Math.round(notLostCount / fiveStarChars.length * 100) : 0;
-            
-            // 评级
-            let rating;
-            if (avgCharPity < 50) rating = '欧皇转世';
-            else if (avgCharPity < 60) rating = '欧气附体小欧皇';
-            else if (avgCharPity < 70) rating = '运气还不错';
-            else if (avgCharPity < 75) rating = '普通人';
-            else rating = '非酋保护';
-            
-            return {
-                playerId: data.player_id || '未知',
-                totalPulls,
-                fiveStarCount: fiveStarChars.length + fiveStarWeapons.length,
-                avgPity: Math.round(avgCharPity * 10) / 10,
-                notLostRate,
-                limitedCount: notLostCount,
-                rating,
-                characters,
-                weapons
-            };
+                loading.classList.add('hidden');
+                btn.disabled = false;
+                btn.textContent = '🚀 开始分析';
+                results.classList.remove('hidden');
+                results.scrollIntoView({ behavior: 'smooth' });
+            }, 1000);
         }
         
         // 生成模拟数据
@@ -665,15 +580,19 @@ https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&pl
         
         // 显示警告
         function showWarning(message) {
-            const errorDiv = document.getElementById('errorDiv');
-            errorDiv.textContent = '⚠️ ' + message;
-            errorDiv.style.borderColor = 'var(--orange-main)';
-            errorDiv.classList.remove('hidden');
+            const warningDiv = document.getElementById('warningDiv');
+            warningDiv.textContent = message;
+            warningDiv.classList.remove('hidden');
         }
         
         // 隐藏错误
         function hideError() {
             document.getElementById('errorDiv').classList.add('hidden');
+        }
+        
+        // 隐藏警告
+        function hideWarning() {
+            document.getElementById('warningDiv').classList.add('hidden');
         }
         
         // 解析 URL 参数
@@ -720,7 +639,7 @@ https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&pl
         }
         
         // 页面加载完成
-        console.log('🌊 鸣潮抽卡分析 H5（CORS 代理版）已加载');
+        console.log('🌊 鸣潮抽卡分析 H5 已加载');
     </script>
 </body>
 </html>
