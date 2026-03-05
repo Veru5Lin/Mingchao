@@ -44,10 +44,23 @@ module.exports = async (req, res) => {
     const serverId = params.get('svr_id');
     const serverArea = params.get('svr_area') || 'cn';
     
+    console.log('解析的参数:', {
+      cardPoolId,
+      cardPoolType,
+      languageCode,
+      playerId,
+      recordId,
+      serverId,
+      serverArea,
+      queryString
+    });
+    
     if (!playerId || !recordId || !serverId) {
       return res.status(400).json({ 
         error: 'Missing required parameters',
-        required: ['player_id', 'record_id', 'svr_id']
+        required: ['player_id', 'record_id', 'svr_id'],
+        received: { playerId, recordId, serverId },
+        queryString
       });
     }
     
