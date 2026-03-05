@@ -14,64 +14,97 @@ module.exports = async (req, res) => {
     return res.status(405).json({ error: 'Method not allowed' });
   }
   
-  const { url, player_id } = req.query;
+  const { url } = req.query;
   
-  if (!player_id) {
+  if (!url) {
     return res.status(400).json({ 
-      error: 'Missing player_id parameter',
-      example: '/api/gacha?player_id=134087912'
+      error: 'Missing URL parameter',
+      example: '/api/gacha?url=https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?...'
     });
   }
   
   try {
-    console.log('获取玩家数据，player_id:', player_id);
+    console.log('解析 URL 参数...');
     
-    // 由于无法直接访问鸣潮 API，返回模拟数据
-    // 真实数据需要逆向 API 或使用云函数 + Playwright
+    // 从 URL 提取参数
+    const urlObj = new URL(url);
+    const params = new URLSearchParams(urlObj.search);
     
-    // 基于 player_id 生成一致的模拟数据
-    let seed = player_id.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
-    const random = () => {
-      seed = (seed * 9301 + 49297) % 233280;
-      return seed / 233280;
-    };
+    const cardPoolId = params.get('resources_id');
+    const cardPoolType = params.get('gacha_type');
+    const languageCode = params.get('lang') || 'zh-Hans';
+    const playerId = params.get('player_id');
+    const recordId = params.get('record_id');
+    const serverId = params.get('svr_id');
+    const serverArea = params.get('svr_area') || 'cn';
     
-    const totalPulls = Math.floor(random() * 300) + 400;
-    const fiveStarCount = Math.floor(totalPulls / (60 + random() * 20));
-    const currentPity = Math.floor(random() * 80);
-    
-    const fiveStars = [];
-    const limitedCharacters = ['吟霖', '忌炎', '今汐', '长离', '折枝', '守岸人', '相里要'];
-    const standardCharacters = ['维里奈', '卡卡罗', '凌阳', '安可', '丹瑾'];
-    
-    for (let i = 0; i < fiveStarCount; i++) {
-      const isLimited = random() > 0.3;
-      const isLost = !isLimited && random() > 0.5;
-      const pulls = Math.floor(random() * 40) + 50;
-      
-      let name;
-      if (isLimited) {
-        name = limitedCharacters[Math.floor(random() * limitedCharacters.length)];
-      } else {
-        name = standardCharacters[Math.floor(random() * standardCharacters.length)];
-      }
-      
-      fiveStars.push({ 
-        name, 
-        pulls, 
-        isLimited, 
-        isLost, 
-        isWeapon: false, 
-        rarity: 5 
+    if (!playerId || !recordId || !serverId) {
+      return res.status(400).json({ 
+        error: 'Missing required parameters',
+        required: ['player_id', 'record_id', 'svr_id']
       });
     }
     
-    const avgPity = fiveStars.length > 0 ?
-      Math.round(fiveStars.reduce((sum, s) => sum + s.pulls, 0) / fiveStars.length * 10) / 10 : 0;
+    console.log('调用鸣潮 API...');
     
-    const limitedCount = fiveStars.filter(s => s.isLimited && !s.isLost).length;
-    const notLostRate = fiveStars.length > 0 ? Math.round(limitedCount / fiveStars.length * 100) : 0;
+    // 调用真实 API
+    const apiUrl = serverArea === 'global' 
+      ? 'https://gmserver-api.aki-game2.net/gacha/record/query'
+      : 'https://gmserver-api.aki-game2.com/gacha/record/query';
     
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 6.2; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36'
+      },
+      body: JSON.stringify({
+        cardPoolId,
+        cardPoolType,
+        languageCode,
+        playerId: parseInt(playerId),
+        recordId,
+        serverId
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`API 响应失败：${response.status}`);
+    }
+    
+    const apiData = await response.json();
+    
+    if (apiData.code !== 0 || apiData.message !== 'success') {
+      throw new Error(`API 返回错误：${apiData.message || 'Unknown error'}`);
+    }
+    
+    console.log('获取成功，记录数:', apiData.data.length);
+    
+    // 处理数据
+    const records = apiData.data || [];
+    
+    // 统计
+    const totalPulls = records.length;
+    const fiveStarRecords = records.filter(r => r.qualityLevel === 5);
+    const fiveStarCount = fiveStarRecords.length;
+    
+    // 计算平均保底
+    let totalPity = 0;
+    let lastPity = 0;
+    fiveStarRecords.forEach(record => {
+      totalPity += lastPity + 1;
+      lastPity = 0;
+    });
+    const avgPity = fiveStarCount > 0 ? Math.round(totalPity / fiveStarCount * 10) / 10 : 0;
+    
+    // 统计不歪
+    const limitedFiveStars = fiveStarRecords.filter(r => 
+      ['吟霖', '忌炎', '今汐', '长离', '折枝', '守岸人', '相里要'].includes(r.name)
+    );
+    const notLostCount = limitedFiveStars.length;
+    const notLostRate = fiveStarCount > 0 ? Math.round(notLostCount / fiveStarCount * 100) : 0;
+    
+    // 评级
     let rating;
     if (avgPity < 50) rating = '欧皇转世';
     else if (avgPity < 60) rating = '欧气附体小欧皇';
@@ -82,17 +115,25 @@ module.exports = async (req, res) => {
     return res.status(200).json({
       success: true,
       data: {
-        playerId: player_id,
+        playerId,
         totalPulls,
         fiveStarCount,
         avgPity,
         notLostRate,
-        limitedCount,
-        currentPity,
+        limitedCount: notLostCount,
         rating,
-        characters: fiveStars,
+        characters: fiveStarRecords.map(r => ({
+          name: r.name,
+          pulls: 0, // 需要计算
+          isLimited: ['吟霖', '忌炎', '今汐', '长离', '折枝', '守岸人', '相里要'].includes(r.name),
+          isLost: !['吟霖', '忌炎', '今汐', '长离', '折枝', '守岸人', '相里要'].includes(r.name),
+          isWeapon: r.resourceType === 'weapon',
+          rarity: r.qualityLevel,
+          time: r.time
+        })),
         weapons: [],
-        note: '当前使用模拟数据。真实数据需要逆向鸣潮 API 或使用 Playwright 云函数。'
+        records: records,
+        note: '真实数据来自鸣潮 API'
       },
       timestamp: new Date().toISOString()
     });
@@ -103,7 +144,7 @@ module.exports = async (req, res) => {
     return res.status(500).json({
       success: false,
       error: error.message,
-      message: '获取抽卡数据失败'
+      message: '获取抽卡数据失败，请检查 URL 是否正确或记录 ID 是否过期'
     });
   }
 };
