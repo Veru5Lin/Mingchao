@@ -1,0 +1,16 @@
+{
+  "name": "wuthering-gacha-api",
+  "version": "1.0.0",
+  "description": "鸣潮抽卡数据 API - Vercel Serverless Function",
+  "main": "api/index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "playwright": "^1.42.0"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
