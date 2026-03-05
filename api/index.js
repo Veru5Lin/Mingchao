@@ -14,17 +14,21 @@ module.exports = async (req, res) => {
     return res.status(405).json({ error: 'Method not allowed' });
   }
   
-  const { url } = req.query;
+  let { url } = req.query;
   
   if (!url) {
     return res.status(400).json({ 
       error: 'Missing URL parameter',
-      example: '/api/gacha?url=https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?...'
+      example: '/api/gacha?url=https://...'
     });
   }
   
   try {
-    console.log('解析 URL 参数...');
+    console.log('原始 URL:', url);
+    
+    // URL 解码（处理编码的 # 和 ?）
+    url = decodeURIComponent(url);
+    console.log('解码后 URL:', url);
     
     // 从 URL 提取参数（处理 #/record? 格式）
     let queryString = '';
@@ -33,6 +37,8 @@ module.exports = async (req, res) => {
     } else if (url.includes('?')) {
       queryString = url.split('?')[1];
     }
+    
+    console.log('提取的 queryString:', queryString);
     
     const params = new URLSearchParams(queryString);
     
