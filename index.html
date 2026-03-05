@@ -425,8 +425,8 @@ https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&pl
             loading.classList.remove('hidden');
             results.classList.add('hidden');
             
-            // 调用 Vercel API 获取数据
-            const apiUrl = `https://mingchao.vercel.app/api/gacha?player_id=${playerId}`;
+            // 调用 Vercel API 获取真实数据
+            const apiUrl = `https://mingchao.vercel.app/api/gacha?url=${encodeURIComponent(input)}`;
             
             fetch(apiUrl)
                 .then(res => res.json())
@@ -440,10 +440,7 @@ https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&pl
                 })
                 .catch(error => {
                     console.error('API 调用失败:', error);
-                    // 降级到本地生成
-                    const analysis = generateAnalysis(playerId);
-                    displayResults(analysis);
-                    showWarning('💡 网络请求失败，使用本地生成数据');
+                    showError('获取真实数据失败：' + error.message + '。请检查 URL 是否正确或记录 ID 是否过期。');
                 })
                 .finally(() => {
                     loading.classList.add('hidden');
