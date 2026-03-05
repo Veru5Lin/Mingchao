@@ -26,9 +26,15 @@ module.exports = async (req, res) => {
   try {
     console.log('解析 URL 参数...');
     
-    // 从 URL 提取参数
-    const urlObj = new URL(url);
-    const params = new URLSearchParams(urlObj.search);
+    // 从 URL 提取参数（处理 #/record? 格式）
+    let queryString = '';
+    if (url.includes('#') && url.split('#')[1].includes('?')) {
+      queryString = url.split('#')[1].split('?')[1];
+    } else if (url.includes('?')) {
+      queryString = url.split('?')[1];
+    }
+    
+    const params = new URLSearchParams(queryString);
     
     const cardPoolId = params.get('resources_id');
     const cardPoolType = params.get('gacha_type');
