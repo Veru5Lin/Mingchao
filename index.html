@@ -425,24 +425,33 @@ https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=xxx&pl
             loading.classList.remove('hidden');
             results.classList.add('hidden');
             
-            // 快速生成模拟数据（1 秒延迟模拟加载）
-            setTimeout(() => {
-                try {
+            // 调用 Vercel API 获取数据
+            const apiUrl = `https://mingchao.vercel.app/api/gacha?player_id=${playerId}`;
+            
+            fetch(apiUrl)
+                .then(res => res.json())
+                .then(response => {
+                    if (response.success && response.data) {
+                        displayResults(response.data);
+                        hideWarning();
+                    } else {
+                        throw new Error('API 返回数据格式错误');
+                    }
+                })
+                .catch(error => {
+                    console.error('API 调用失败:', error);
+                    // 降级到本地生成
                     const analysis = generateAnalysis(playerId);
                     displayResults(analysis);
-                    
-                    showWarning('💡 提示：当前使用模拟数据。如需真实数据，需要从游戏日志 Client.log 中提取包含 authkey 的 API URL。');
-                } catch (error) {
-                    console.error('分析出错:', error);
-                    showError('分析失败，请检查 URL 格式是否正确');
-                }
-                
-                loading.classList.add('hidden');
-                btn.disabled = false;
-                btn.textContent = '🚀 开始分析';
-                results.classList.remove('hidden');
-                results.scrollIntoView({ behavior: 'smooth' });
-            }, 1000);
+                    showWarning('💡 网络请求失败，使用本地生成数据');
+                })
+                .finally(() => {
+                    loading.classList.add('hidden');
+                    btn.disabled = false;
+                    btn.textContent = '🚀 开始分析';
+                    results.classList.remove('hidden');
+                    results.scrollIntoView({ behavior: 'smooth' });
+                });
         }
         
         // 生成模拟数据
